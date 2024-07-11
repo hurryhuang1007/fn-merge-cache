@@ -1,0 +1,28 @@
+{
+  "name": "merge-promise",
+  "version": "0.0.1",
+  "description": "merge same promise call with cache control",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "scripts": {
+    "dev": "father dev",
+    "build": "father build",
+    "build:deps": "father prebundle",
+    "prepublishOnly": "father doctor && npm run build"
+  },
+  "keywords": [],
+  "authors": [
+    "hurry"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist",
+    "compiled"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "father": "^4.5.0-rc.2"
+  }
+}
