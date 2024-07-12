@@ -23,6 +23,12 @@
     "access": "public"
   },
   "devDependencies": {
+    "@types/events": "^3.0.3",
+    "@types/lodash-es": "^4.17.12",
     "father": "^4.5.0-rc.2"
+  },
+  "dependencies": {
+    "events": "^3.3.0",
+    "lodash-es": "^4.17.21"
   }
 }
