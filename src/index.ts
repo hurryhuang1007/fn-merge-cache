@@ -7,51 +7,30 @@ const _queueMicrotask: typeof queueMicrotask =
   typeof queueMicrotask === "function"
     ? queueMicrotask
     : (fn) => Promise.resolve().then(fn);
-export type PromiseFn<A extends any[], R> = (...args: A) => Promise<R>;
-export type MergedPromise<A extends any[], R> = PromiseFn<A, R> & {
-  revalidate: () => void;
-  dispose: () => void;
-};
+export type PromiseFn<A extends any[], R> = (...args: A) => Promise<R> | R;
 
 const revalidateEE = new EventEmitter();
 
-/**
- * Merge promise calls with the same parameters (deep comparison)
- * @param {Function} promiseFn
- * @param {object} opt
- * @param {boolean} opt.persist Whether to cache the call result
- * @param {boolean} opt.persistOnReject Should the call result still be cached when rejected
- * @param {Function} opt.argComparer Parameter comparison function, returns true if the parameters are consistent
- * @param {number} opt.ttl Cache lifetime, pass 0 means never expires
- * @param {number} opt.maxCacheSize Cache pool size limit, pass 0 means no limit
- */
-export default function mergePromise<A extends any[], R>(
-  promiseFn: PromiseFn<A, R>,
-  {
-    persist = false,
-    persistOnReject = false,
-    argComparer = isEqual,
-    ttl = oneHour / 3,
-    maxCacheSize = 0,
-  } = {}
-): MergedPromise<A, R> {
-  const _pending = new Map<
+class MergePromise<A extends any[], R> {
+  private _promiseFn;
+  private _persist;
+  private _persistOnReject;
+  private _argComparer;
+  private _ttl;
+  private _maxCacheSize;
+  private _tags;
+
+  private _pending = new Map<
     A,
     [((value: R) => void)[], ((reason?: any) => void)[]]
   >(); // arg: [[resolve, ...], [reject, ...]]
-  const _resultKeys = new Set<[A, number]>(); // [[arg, time], ...]
-  const _result = new WeakMap<A, [R?, Error?]>(); // arg: [result, error]
+  private _result = new Map<A, [number, R?, Error?]>(); // arg: [time, result, error]
 
-  const callGC = throttle(() => {
+  private _callGC = throttle(() => {
     const now = Date.now();
-    for (const i of _resultKeys) {
-      if (
-        !_result.has(i[0]) ||
-        (ttl && now - i[1] > ttl) ||
-        (maxCacheSize && _resultKeys.size > maxCacheSize)
-      ) {
-        _result.delete(i[0]);
-        _resultKeys.delete(i);
+    for (const [k, v] of this._result) {
+      if ((this._ttl && now - v[0] > this._ttl) || (this._maxCacheSize && this._result.size > this._maxCacheSize)) {
+        this._result.delete(k);
       } else {
         // Since it is sorted by time, you can exit once you encounter an unexpired one.
         break;
@@ -59,30 +38,69 @@ export default function mergePromise<A extends any[], R>(
     }
   }, 1000);
 
-  function mergedPromise(...args: A) {
-    return new Promise((resolve, reject) => {
-      if (persist) {
-        _queueMicrotask(callGC);
+  /**
+   * Merge promise calls with the same parameters (deep comparison)
+   * @param {Function} promiseFn
+   * @param {object} opt
+   * @param {boolean} opt.persist Whether to cache the call result
+   * @param {boolean} opt.persistOnReject Should the call result still be cached when rejected
+   * @param {Function} opt.argComparer Parameter comparison function, returns true if the parameters are consistent
+   * @param {number} opt.ttl Cache lifetime, pass 0 means never expires
+   * @param {number} opt.maxCacheSize Cache pool size limit, pass 0 means no limit
+   */
+  constructor(
+    promiseFn: PromiseFn<A, R>,
+    {
+      persist = false,
+      persistOnReject = false,
+      argComparer = isEqual,
+      ttl = oneHour / 3,
+      maxCacheSize = 0,
+      tags = [],
+    } = {}
+  ) {
+    this._promiseFn = promiseFn;
+    this._persist = persist;
+    this._persistOnReject = persistOnReject;
+    this._argComparer = argComparer;
+    this._ttl = ttl;
+    this._maxCacheSize = maxCacheSize;
+    this._tags = tags;
+  }
 
-        const resultKey = [..._resultKeys].find((i) => argComparer(i[0], args));
+  call(...args: A) {
+    return new Promise<R>((resolve, reject) => {
+      if (this._persist) {
+        _queueMicrotask(this._callGC);
+
+        let resultKey
+        for (const k of this._result.keys()) {
+          if (this._argComparer(k, args)) {
+            resultKey = k;
+            break;
+          }
+        }
         if (resultKey) {
-          if (!ttl || Date.now() - resultKey[1] <= ttl) {
-            const result = _result.get(resultKey[0]);
-            if (result) {
-              if (result[1]) reject(result[1]);
-              else resolve(result[0]!);
-              return;
-            }
+          const result = this._result.get(resultKey)!;
+          if (!this._ttl || Date.now() - result[0] <= this._ttl) {
+            if (result[2]) reject(result[2]);
+            else resolve(result[1]!);
+            return;
           }
 
-          _result.delete(resultKey[0]);
-          _resultKeys.delete(resultKey);
+          this._result.delete(resultKey);
         }
       }
 
-      let pendingKey = [..._pending.keys()].find((i) => argComparer(i, args));
+      let pendingKey;
+      for (const k of this._pending.keys()) {
+        if (this._argComparer(k, args)) {
+          pendingKey = k;
+          break;
+        }
+      }
       if (pendingKey) {
-        const pending = _pending.get(pendingKey)!;
+        const pending = this._pending.get(pendingKey)!;
         pending[0].push(resolve);
         pending[1].push(reject);
         return;
@@ -93,30 +111,42 @@ export default function mergePromise<A extends any[], R>(
         ((value: any) => void)[],
         ((reason?: any) => void)[]
       ];
-      _pending.set(pendingKey, pendingValue);
-      promiseFn(...args)
-        .then((res) => {
-          pendingValue[0].forEach((fn) => fn(res));
-          _pending.delete(pendingKey!);
-          if (persist) {
-            _resultKeys.add([pendingKey!, Date.now()]);
-            _result.set(pendingKey!, [res]);
-          }
-        })
-        .catch((e) => {
-          pendingValue[1].forEach((fn) => fn(e));
-          _pending.delete(pendingKey!);
-          if (persist && persistOnReject) {
-            _resultKeys.add([pendingKey!, Date.now()]);
-            _result.set(pendingKey!, [undefined, e]);
-          }
-        });
+      this._pending.set(pendingKey, pendingValue);
+
+      const handleResult = (res: R) => {
+        pendingValue[0].forEach((fn) => fn(res));
+        this._pending.delete(pendingKey);
+        if (this._persist) {
+          this._result.set(pendingKey, [Date.now(), res]);
+        }
+      };
+
+      const handleError = (e: Error) => {
+        pendingValue[1].forEach((fn) => fn(e));
+        this._pending.delete(pendingKey);
+        if (this._persist && this._persistOnReject) {
+          this._result.set(pendingKey, [Date.now(), undefined, e]);
+        }
+      };
+
+      try {
+        const promise = this._promiseFn.call(undefined, ...args);
+        if (promise instanceof Promise) {
+          promise.then(handleResult, handleError);
+        } else {
+          handleResult(promise);
+        }
+      } catch (e) {
+        handleError(e as Error);
+      }
     });
   }
 
-  mergedPromise.revalidate = () => {};
+  revalidate() {
+    this._result.clear();
+  }
 
-  mergedPromise.dispose = () => {};
-
-  return mergedPromise as MergedPromise<A, R>;
+  dispose() {}
 }
+
+export default MergePromise;
