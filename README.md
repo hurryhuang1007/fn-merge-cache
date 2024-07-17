@@ -6,17 +6,10 @@
 ## Install
 
 ```bash
-$ pnpm install
+npm install merge-promise
 ```
 
-```bash
-$ npm run dev
-$ npm run build
-```
-
-## Options
-
-TODO
+## TODO...
 
 ## LICENSE
 
