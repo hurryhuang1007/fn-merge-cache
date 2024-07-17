@@ -51,6 +51,7 @@ class MergePromise<A extends any[], R> {
    * @param {Function} opt.argComparer Parameter comparison function, returns true if the parameters are consistent
    * @param {number} opt.ttl Cache lifetime, pass 0 means never expires
    * @param {number} opt.maxCacheSize Cache pool size limit, pass 0 means no limit
+   * @param {string[]} opt.tags revalidate tags
    */
   constructor(
     promiseFn: PromiseFn<A, R>,
