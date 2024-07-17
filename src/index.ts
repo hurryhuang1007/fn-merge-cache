@@ -12,6 +12,7 @@ export type PromiseFn<A extends any[], R> = (...args: A) => Promise<R> | R;
 const revalidateEE = new EventEmitter();
 
 class MergePromise<A extends any[], R> {
+  private _disposed = false;
   private _promiseFn;
   private _persist;
   private _persistOnReject;
@@ -29,7 +30,10 @@ class MergePromise<A extends any[], R> {
   private _callGC = throttle(() => {
     const now = Date.now();
     for (const [k, v] of this._result) {
-      if ((this._ttl && now - v[0] > this._ttl) || (this._maxCacheSize && this._result.size > this._maxCacheSize)) {
+      if (
+        (this._ttl && now - v[0] > this._ttl) ||
+        (this._maxCacheSize && this._result.size > this._maxCacheSize)
+      ) {
         this._result.delete(k);
       } else {
         // Since it is sorted by time, you can exit once you encounter an unexpired one.
@@ -66,14 +70,21 @@ class MergePromise<A extends any[], R> {
     this._ttl = ttl;
     this._maxCacheSize = maxCacheSize;
     this._tags = tags;
+
+    revalidateEE.on("all", this.revalidate);
+    tags.forEach((tag) => revalidateEE.on(tag, this.revalidate));
   }
 
   call(...args: A) {
+    if (this._disposed) {
+      throw new Error("MergePromise instance has been disposed");
+    }
+
     return new Promise<R>((resolve, reject) => {
       if (this._persist) {
         _queueMicrotask(this._callGC);
 
-        let resultKey
+        let resultKey;
         for (const k of this._result.keys()) {
           if (this._argComparer(k, args)) {
             resultKey = k;
@@ -92,7 +103,7 @@ class MergePromise<A extends any[], R> {
         }
       }
 
-      let pendingKey;
+      let pendingKey: A | undefined;
       for (const k of this._pending.keys()) {
         if (this._argComparer(k, args)) {
           pendingKey = k;
@@ -106,26 +117,26 @@ class MergePromise<A extends any[], R> {
         return;
       }
 
-      pendingKey = args;
+      // pendingKey = args;
       const pendingValue = [[resolve], [reject]] as [
         ((value: any) => void)[],
         ((reason?: any) => void)[]
       ];
-      this._pending.set(pendingKey, pendingValue);
+      this._pending.set(args, pendingValue);
 
       const handleResult = (res: R) => {
         pendingValue[0].forEach((fn) => fn(res));
-        this._pending.delete(pendingKey);
-        if (this._persist) {
-          this._result.set(pendingKey, [Date.now(), res]);
+        this._pending.delete(args);
+        if (this._persist && !this._disposed) {
+          this._result.set(args, [Date.now(), res]);
         }
       };
 
       const handleError = (e: Error) => {
         pendingValue[1].forEach((fn) => fn(e));
-        this._pending.delete(pendingKey);
-        if (this._persist && this._persistOnReject) {
-          this._result.set(pendingKey, [Date.now(), undefined, e]);
+        this._pending.delete(args);
+        if (this._persist && this._persistOnReject && !this._disposed) {
+          this._result.set(args, [Date.now(), undefined, e]);
         }
       };
 
@@ -142,11 +153,24 @@ class MergePromise<A extends any[], R> {
     });
   }
 
-  revalidate() {
+  revalidate = () => {
     this._result.clear();
-  }
+  };
 
-  dispose() {}
+  dispose() {
+    this._disposed = true;
+    this._result.clear();
+    revalidateEE.off("all", this.revalidate);
+    this._tags.forEach((tag) => revalidateEE.off(tag, this.revalidate));
+  }
 }
 
 export default MergePromise;
+
+export function revalidateTag(tag: string | string[] = "all") {
+  if (Array.isArray(tag)) {
+    tag.forEach((t) => revalidateEE.emit(t));
+  } else {
+    revalidateEE.emit(tag);
+  }
+}
