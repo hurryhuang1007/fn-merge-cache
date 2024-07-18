@@ -10,6 +10,7 @@ const _queueMicrotask: typeof queueMicrotask =
 export type PromiseFn<A extends any[], R> = (...args: A) => Promise<R> | R;
 
 const revalidateEE = new EventEmitter();
+const revalidateAllStr = "__MERGE_PROMISE_INSIDE__all";
 
 class MergePromise<A extends any[], R> {
   private _disposed = false;
@@ -61,9 +62,15 @@ class MergePromise<A extends any[], R> {
       argComparer = isEqual,
       ttl = oneHour / 3,
       maxCacheSize = 0,
-      tags = [],
+      tags = [] as string[],
     } = {}
   ) {
+    if (tags.includes(revalidateAllStr)) {
+      throw new Error(
+        `Tag name "${revalidateAllStr}" is reserved, please use another tag name`
+      );
+    }
+
     this._promiseFn = promiseFn;
     this._persist = persist;
     this._persistOnReject = persistOnReject;
@@ -72,7 +79,7 @@ class MergePromise<A extends any[], R> {
     this._maxCacheSize = maxCacheSize;
     this._tags = tags;
 
-    revalidateEE.on("all", this.revalidate);
+    revalidateEE.on(revalidateAllStr, this.revalidate);
     tags.forEach((tag) => revalidateEE.on(tag, this.revalidate));
   }
 
@@ -161,14 +168,14 @@ class MergePromise<A extends any[], R> {
   dispose() {
     this._disposed = true;
     this._result.clear();
-    revalidateEE.off("all", this.revalidate);
+    revalidateEE.off(revalidateAllStr, this.revalidate);
     this._tags.forEach((tag) => revalidateEE.off(tag, this.revalidate));
   }
 }
 
 export default MergePromise;
 
-export function revalidateTag(tag: string | string[] = "all") {
+export function revalidateTag(tag: string | string[] = revalidateAllStr) {
   if (Array.isArray(tag)) {
     tag.forEach((t) => revalidateEE.emit(t));
   } else {

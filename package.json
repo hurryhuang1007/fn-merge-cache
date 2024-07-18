@@ -28,6 +28,7 @@
     "father": "^4.5.0-rc.2"
   },
   "dependencies": {
+    "@babel/runtime": "^7.24.8",
     "events": "^3.3.0",
     "lodash-es": "^4.17.21"
   }
