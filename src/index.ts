@@ -13,8 +13,8 @@ const revalidateAllStr = "__FN_MERGE_CACHE_INSIDE__all";
 class FnMergeCache<A extends any[], R> {
   private _disposed = false;
   private _fn;
-  private _persist;
-  private _persistOnError;
+  private _cache;
+  private _cacheOnError;
   private _argComparer;
   private _ttl;
   private _maxCacheSize;
@@ -41,8 +41,8 @@ class FnMergeCache<A extends any[], R> {
    * Merge same (async) function calls by the same parameters (deep comparison)
    * @param {Function} fn
    * @param {object} opt
-   * @param {boolean} opt.persist Whether to cache the call result
-   * @param {boolean} opt.persistOnError Should the call result still be cached when error occurs
+   * @param {boolean} opt.cache Whether to cache the call result
+   * @param {boolean} opt.cacheOnError Should the call result still be cached when error occurs
    * @param {Function} opt.argComparer Parameter comparison function, returns true if the parameters are consistent
    * @param {number} opt.ttl Cache lifetime, pass 0 means never expires. default 0
    * @param {number} opt.maxCacheSize Cache pool size limit, pass 0 means no limit
@@ -51,8 +51,8 @@ class FnMergeCache<A extends any[], R> {
   constructor(
     fn: (...args: A) => R,
     {
-      persist = false,
-      persistOnError = false,
+      cache = true,
+      cacheOnError = false,
       argComparer = isEqual,
       ttl = 0,
       maxCacheSize = 0,
@@ -66,8 +66,8 @@ class FnMergeCache<A extends any[], R> {
     }
 
     this._fn = fn;
-    this._persist = persist;
-    this._persistOnError = persistOnError;
+    this._cache = cache;
+    this._cacheOnError = cacheOnError;
     this._argComparer = argComparer;
     this._ttl = ttl;
     this._maxCacheSize = maxCacheSize;
@@ -82,7 +82,7 @@ class FnMergeCache<A extends any[], R> {
       throw new Error("FnMergeCache instance has been disposed");
     }
 
-    if (this._persist) {
+    if (this._cache) {
       _queueMicrotask(this._callGC);
 
       let resultKey;
@@ -109,28 +109,28 @@ class FnMergeCache<A extends any[], R> {
       if (fnResult instanceof Promise) {
         this._result.set(args, [now, fnResult]); // for merge promise call
 
-        return fnResult.then(
-          (res) => {
-            if (!this._persist) {
+        fnResult.then(
+          () => {
+            if (!this._cache) {
               this._result.delete(args);
             }
-            return res;
           },
-          (e) => {
-            if (!this._persist || !this._persistOnError) {
+          () => {
+            if (!this._cache || !this._cacheOnError) {
               this._result.delete(args);
             }
-            throw e;
           }
-        ) as R;
+        );
+
+        return fnResult;
       } else {
-        if (this._persist) {
+        if (this._cache) {
           this._result.set(args, [now, fnResult]);
         }
         return fnResult;
       }
     } catch (e) {
-      if (this._persist && this._persistOnError) {
+      if (this._cache && this._cacheOnError) {
         this._result.set(args, [now, void 0, e]);
       }
       throw e;
@@ -150,6 +150,14 @@ class FnMergeCache<A extends any[], R> {
 }
 
 export default FnMergeCache;
+
+export function createMergedCachedFn<A extends any[], R>(
+  fn: (...args: A) => R,
+  opt: ConstructorParameters<typeof FnMergeCache>[1]
+) {
+  const cache = new FnMergeCache(fn, opt);
+  return cache.call.bind(cache);
+}
 
 export function revalidateTag(tag: string | string[] = revalidateAllStr) {
   if (Array.isArray(tag)) {
