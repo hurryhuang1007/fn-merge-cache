@@ -1,32 +1,26 @@
 import { isEqual, throttle } from "lodash-es";
 import { EventEmitter } from "events";
 
-const oneHour = 60 * 60 * 1000;
 // hack for next.js edge runtime
 const _queueMicrotask: typeof queueMicrotask =
   typeof queueMicrotask === "function"
     ? queueMicrotask
     : (fn) => Promise.resolve().then(fn);
-export type PromiseFn<A extends any[], R> = (...args: A) => Promise<R> | R;
 
 const revalidateEE = new EventEmitter();
-const revalidateAllStr = "__MERGE_PROMISE_INSIDE__all";
+const revalidateAllStr = "__FN_MERGE_CACHE_INSIDE__all";
 
-class MergePromise<A extends any[], R> {
+class FnMergeCache<A extends any[], R> {
   private _disposed = false;
-  private _promiseFn;
+  private _fn;
   private _persist;
-  private _persistOnReject;
+  private _persistOnError;
   private _argComparer;
   private _ttl;
   private _maxCacheSize;
   private _tags;
 
-  private _pending = new Map<
-    A,
-    [((value: R) => void)[], ((reason?: any) => void)[]]
-  >(); // arg: [[resolve, ...], [reject, ...]]
-  private _result = new Map<A, [number, R?, Error?]>(); // arg: [time, result, error]
+  private _result = new Map<A, [number, R?, any?]>(); // arg: [time, result, error]
 
   private _callGC = throttle(() => {
     const now = Date.now();
@@ -44,23 +38,23 @@ class MergePromise<A extends any[], R> {
   }, 1000);
 
   /**
-   * Merge promise calls with the same parameters (deep comparison)
-   * @param {Function} promiseFn
+   * Merge same (async) function calls by the same parameters (deep comparison)
+   * @param {Function} fn
    * @param {object} opt
    * @param {boolean} opt.persist Whether to cache the call result
-   * @param {boolean} opt.persistOnReject Should the call result still be cached when rejected
+   * @param {boolean} opt.persistOnError Should the call result still be cached when error occurs
    * @param {Function} opt.argComparer Parameter comparison function, returns true if the parameters are consistent
-   * @param {number} opt.ttl Cache lifetime, pass 0 means never expires
+   * @param {number} opt.ttl Cache lifetime, pass 0 means never expires. default 0
    * @param {number} opt.maxCacheSize Cache pool size limit, pass 0 means no limit
    * @param {string[]} opt.tags revalidate tags
    */
   constructor(
-    promiseFn: PromiseFn<A, R>,
+    fn: (...args: A) => R,
     {
       persist = false,
-      persistOnReject = false,
+      persistOnError = false,
       argComparer = isEqual,
-      ttl = oneHour / 3,
+      ttl = 0,
       maxCacheSize = 0,
       tags = [] as string[],
     } = {}
@@ -71,9 +65,9 @@ class MergePromise<A extends any[], R> {
       );
     }
 
-    this._promiseFn = promiseFn;
+    this._fn = fn;
     this._persist = persist;
-    this._persistOnReject = persistOnReject;
+    this._persistOnError = persistOnError;
     this._argComparer = argComparer;
     this._ttl = ttl;
     this._maxCacheSize = maxCacheSize;
@@ -83,82 +77,64 @@ class MergePromise<A extends any[], R> {
     tags.forEach((tag) => revalidateEE.on(tag, this.revalidate));
   }
 
-  call(...args: A) {
+  call(...args: A): R {
     if (this._disposed) {
-      throw new Error("MergePromise instance has been disposed");
+      throw new Error("FnMergeCache instance has been disposed");
     }
 
-    return new Promise<R>((resolve, reject) => {
-      if (this._persist) {
-        _queueMicrotask(this._callGC);
+    if (this._persist) {
+      _queueMicrotask(this._callGC);
 
-        let resultKey;
-        for (const k of this._result.keys()) {
-          if (this._argComparer(k, args)) {
-            resultKey = k;
-            break;
-          }
-        }
-        if (resultKey) {
-          const result = this._result.get(resultKey)!;
-          if (!this._ttl || Date.now() - result[0] <= this._ttl) {
-            if (result[2]) reject(result[2]);
-            else resolve(result[1]!);
-            return;
-          }
-
-          this._result.delete(resultKey);
-        }
-      }
-
-      let pendingKey: A | undefined;
-      for (const k of this._pending.keys()) {
+      let resultKey;
+      for (const k of this._result.keys()) {
         if (this._argComparer(k, args)) {
-          pendingKey = k;
+          resultKey = k;
           break;
         }
       }
-      if (pendingKey) {
-        const pending = this._pending.get(pendingKey)!;
-        pending[0].push(resolve);
-        pending[1].push(reject);
-        return;
+      if (resultKey) {
+        const result = this._result.get(resultKey)!;
+        if (!this._ttl || Date.now() - result[0] <= this._ttl) {
+          if (result[2]) throw result[2];
+          return result[1]!;
+        }
+
+        this._result.delete(resultKey);
       }
+    }
 
-      // pendingKey = args;
-      const pendingValue = [[resolve], [reject]] as [
-        ((value: any) => void)[],
-        ((reason?: any) => void)[]
-      ];
-      this._pending.set(args, pendingValue);
+    const now = Date.now();
+    try {
+      const fnResult = this._fn.call(void 0, ...args);
+      if (fnResult instanceof Promise) {
+        this._result.set(args, [now, fnResult]); // for merge promise call
 
-      const handleResult = (res: R) => {
-        pendingValue[0].forEach((fn) => fn(res));
-        this._pending.delete(args);
-        if (this._persist && !this._disposed) {
-          this._result.set(args, [Date.now(), res]);
+        return fnResult.then(
+          (res) => {
+            if (!this._persist) {
+              this._result.delete(args);
+            }
+            return res;
+          },
+          (e) => {
+            if (!this._persist || !this._persistOnError) {
+              this._result.delete(args);
+            }
+            throw e;
+          }
+        ) as R;
+      } else {
+        if (this._persist) {
+          this._result.set(args, [now, fnResult]);
         }
-      };
-
-      const handleError = (e: Error) => {
-        pendingValue[1].forEach((fn) => fn(e));
-        this._pending.delete(args);
-        if (this._persist && this._persistOnReject && !this._disposed) {
-          this._result.set(args, [Date.now(), undefined, e]);
-        }
-      };
-
-      try {
-        const promise = this._promiseFn.call(undefined, ...args);
-        if (promise instanceof Promise) {
-          promise.then(handleResult, handleError);
-        } else {
-          handleResult(promise);
-        }
-      } catch (e) {
-        handleError(e as Error);
+        return fnResult;
       }
-    });
+    } catch (e) {
+      if (this._persist && this._persistOnError) {
+        this._result.set(args, [now, void 0, e]);
+      }
+      throw e;
+    }
   }
 
   revalidate = () => {
@@ -173,7 +149,7 @@ class MergePromise<A extends any[], R> {
   }
 }
 
-export default MergePromise;
+export default FnMergeCache;
 
 export function revalidateTag(tag: string | string[] = revalidateAllStr) {
   if (Array.isArray(tag)) {
