@@ -83,23 +83,29 @@ export class FnMergeCache<A extends any[], R> {
 
     if (this._cache) {
       _queueMicrotask(this._callGC);
+    }
 
-      let resultKey;
-      for (const k of this._result.keys()) {
-        if (this._argComparer(k, args)) {
-          resultKey = k;
-          break;
-        }
+    let resultKey;
+    for (const k of this._result.keys()) {
+      if (this._argComparer(k, args)) {
+        resultKey = k;
+        break;
       }
-      if (resultKey) {
-        const result = this._result.get(resultKey)!;
-        if (!this._ttl || Date.now() - result[0] <= this._ttl) {
-          if (result[2]) throw result[2];
-          return result[1]!;
+    }
+    if (resultKey) {
+      const result = this._result.get(resultKey)!;
+      if (!this._ttl || Date.now() - result[0] <= this._ttl) {
+        if (this._cache && !this._ttl) {
+          // use lru strategy
+          this._result.delete(resultKey);
+          this._result.set(resultKey, result);
         }
 
-        this._result.delete(resultKey);
+        if (result[2]) throw result[2];
+        return result[1]!;
       }
+
+      this._result.delete(resultKey);
     }
 
     const now = Date.now();
