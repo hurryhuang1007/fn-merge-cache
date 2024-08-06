@@ -1,7 +1,12 @@
 {
   "name": "fn-merge-cache",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "`FnMergeCache` is a caching utility that allows functions to cache their results based on input arguments, with options for cache lifetime, size limits, error handling, and parameter comparison, while supporting cache invalidation via tags and global revalidation.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hurryhuang1007/fn-merge-cache"
+  },
+  "homepage": "https://github.com/hurryhuang1007/fn-merge-cache#readme",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
   "scripts": {
@@ -10,7 +15,29 @@
     "build:deps": "father prebundle",
     "prepublishOnly": "father doctor && npm run build"
   },
-  "keywords": [],
+  "keywords": [
+    "cache",
+	  "caching",
+	  "function-cache",
+	  "result-cache",
+	  "memoize",
+	  "memoization",
+	  "throttle",
+	  "debounce",
+	  "performance",
+	  "optimization",
+	  "ttl",
+    "lru",
+	  "cache-invalidation",
+	  "event-driven-cache",
+	  "promise-cache",
+	  "javascript-cache",
+	  "cache-utility",
+	  "cache-management",
+	  "error-handling",
+	  "parameter-comparison",
+	  "tag-based-cache"
+  ],
   "authors": [
     "hurry"
   ],

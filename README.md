@@ -22,6 +22,7 @@ npm install fn-merge-cache
 6. Cache invalidation: cache invalidation and revalidation (revalidation) through the tag mechanism, you can revalidate the cache by tag or globally.
 7. Merge promises: support processing the returned Promise, and update the cache status after the Promise is resolved.
 8. Event-driven: use EventEmitter for cache invalidation notification, allowing fine control over the validity of the cache.
+9. Intelligent caching strategy: When the cache TTL is not set, the LRU algorithm will be used.
 
 ## API
 
