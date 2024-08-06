@@ -10,7 +10,7 @@ const _queueMicrotask: typeof queueMicrotask =
 const revalidateEE = new EventEmitter();
 const revalidateAllStr = "__FN_MERGE_CACHE_INSIDE__all";
 
-class FnMergeCache<A extends any[], R> {
+export class FnMergeCache<A extends any[], R> {
   private _disposed = false;
   private _fn;
   private _cache;
@@ -38,7 +38,6 @@ class FnMergeCache<A extends any[], R> {
   }, 1000);
 
   /**
-   * Merge same (async) function calls by the same parameters (deep comparison)
    * @param {Function} fn
    * @param {object} opt
    * @param {boolean} opt.cache Whether to cache the call result

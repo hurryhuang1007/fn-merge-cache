@@ -1,7 +1,7 @@
 {
   "name": "fn-merge-cache",
-  "version": "0.0.1",
-  "description": "merge same (async) function call with cache control",
+  "version": "1.0.0",
+  "description": "`FnMergeCache` is a caching utility that allows functions to cache their results based on input arguments, with options for cache lifetime, size limits, error handling, and parameter comparison, while supporting cache invalidation via tags and global revalidation.",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
   "scripts": {
