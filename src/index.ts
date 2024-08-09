@@ -81,7 +81,7 @@ export class FnMergeCache<A extends any[], R> {
       throw new Error("FnMergeCache instance has been disposed");
     }
 
-    if (this._cache) {
+    if (this._cache && (this._ttl || this._maxCacheSize)) {
       _queueMicrotask(this._callGC);
     }
 
@@ -95,7 +95,7 @@ export class FnMergeCache<A extends any[], R> {
     if (resultKey) {
       const result = this._result.get(resultKey)!;
       if (!this._ttl || Date.now() - result[0] <= this._ttl) {
-        if (this._cache && !this._ttl) {
+        if (this._cache && !this._ttl && this._maxCacheSize) {
           // use lru strategy
           this._result.delete(resultKey);
           this._result.set(resultKey, result);

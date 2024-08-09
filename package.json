@@ -1,6 +1,6 @@
 {
   "name": "fn-merge-cache",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "`FnMergeCache` is a caching utility that allows functions to cache their results based on input arguments, with options for cache lifetime, size limits, error handling, and parameter comparison, while supporting cache invalidation via tags and global revalidation.",
   "repository": {
     "type": "git",
