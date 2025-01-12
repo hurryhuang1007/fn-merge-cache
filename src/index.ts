@@ -10,6 +10,12 @@ const _queueMicrotask: typeof queueMicrotask =
 const revalidateEE = new EventEmitter();
 const revalidateAllStr = "__FN_MERGE_CACHE_INSIDE__all";
 
+/**
+ * A class for merging and caching function calls
+ *
+ * @typeParam A - Tuple type of function parameters
+ * @typeParam R - Function return type
+ */
 export class FnMergeCache<A extends any[], R> {
   private _disposed = false;
   private _fn;
@@ -38,14 +44,18 @@ export class FnMergeCache<A extends any[], R> {
   }, 1000);
 
   /**
-   * @param {Function} fn
-   * @param {object} opt
-   * @param {boolean} opt.cache Whether to cache the call result
-   * @param {boolean} opt.cacheOnError Should the call result still be cached when error occurs
-   * @param {Function} opt.argComparer Parameter comparison function, returns true if the parameters are consistent
-   * @param {number} opt.ttl Cache lifetime, pass 0 means never expires. default 0
-   * @param {number} opt.maxCacheSize Cache pool size limit, pass 0 means no limit
-   * @param {string[]} opt.tags revalidate tags
+   * Creates a new FnMergeCache instance
+   *
+   * @param fn - The original function to be cached
+   * @param options - Configuration options
+   * @param options.cache - Whether to enable caching
+   * @param options.cacheOnError - Whether to cache results when errors occur
+   * @param options.argComparer - Parameter comparison function, returns true if parameters are equal
+   * @param options.ttl - Cache lifetime in milliseconds, 0 means never expires
+   * @param options.maxCacheSize - Cache pool size limit, 0 means no limit
+   * @param options.tags - Tags for cache revalidation
+   *
+   * @throws Error when using reserved tag names
    */
   constructor(
     fn: (...args: A) => R,
@@ -76,6 +86,13 @@ export class FnMergeCache<A extends any[], R> {
     tags.forEach((tag) => revalidateEE.on(tag, this.revalidate));
   }
 
+  /**
+   * Calls the cached function
+   *
+   * @param args - Arguments passed to the original function
+   * @returns Function return value, may be cached result
+   * @throws Error if instance is disposed or original function throws
+   */
   call(...args: A): R {
     if (this._disposed) {
       throw new Error("FnMergeCache instance has been disposed");
@@ -142,10 +159,16 @@ export class FnMergeCache<A extends any[], R> {
     }
   }
 
+  /**
+   * Clears all cached results
+   */
   revalidate = () => {
     this._result.clear();
   };
 
+  /**
+   * Destroys the instance, clears all caches and event listeners
+   */
   dispose() {
     this._disposed = true;
     this._result.clear();
@@ -156,14 +179,34 @@ export class FnMergeCache<A extends any[], R> {
 
 export default FnMergeCache;
 
+/**
+ * Creates a function with caching capability
+ *
+ * @typeParam A - Tuple type of function parameters
+ * @typeParam R - Function return type
+ * @param fn - The original function to be cached
+ * @param opts - FnMergeCache configuration options
+ * @param opts.cache - Whether to enable caching
+ * @param opts.cacheOnError - Whether to cache results when errors occur
+ * @param opts.argComparer - Parameter comparison function, returns true if parameters are equal
+ * @param opts.ttl - Cache lifetime in milliseconds, 0 means never expires
+ * @param opts.maxCacheSize - Cache pool size limit, 0 means no limit
+ * @param opts.tags - Tags for cache revalidation
+ * @returns A new function with caching capability
+ */
 export function createMergedCachedFn<A extends any[], R>(
   fn: (...args: A) => R,
-  opt: ConstructorParameters<typeof FnMergeCache>[1]
+  opts: ConstructorParameters<typeof FnMergeCache>[1]
 ) {
-  const cache = new FnMergeCache(fn, opt);
+  const cache = new FnMergeCache(fn, opts);
   return cache.call.bind(cache);
 }
 
+/**
+ * Invalidates cache for specified tags
+ *
+ * @param tag - Tag or array of tags to invalidate, defaults to invalidating all caches
+ */
 export function revalidateTag(tag: string | string[] = revalidateAllStr) {
   if (Array.isArray(tag)) {
     tag.forEach((t) => revalidateEE.emit(t));
